@@ -75,7 +75,8 @@ jobs:
           cp src/app/tor src/config/geoip src/config/geoip6 \
             country-data/exit-countries \
             scripts/maint/update_exit_country_map.py \
-            torrc.country.example README.md LICENSE "dist/$package/"
+            torrc.country.example README.md README.zh-CN.md LICENSE \
+            "dist/$package/"
           tar -C dist -czf "dist/$package.tar.gz" "$package"
       - uses: actions/upload-artifact@v4
         with:
@@ -125,7 +126,8 @@ jobs:
           cp src/app/tor src/config/geoip src/config/geoip6 \
             country-data/exit-countries \
             scripts/maint/update_exit_country_map.py \
-            torrc.country.example README.md LICENSE "dist/$package/"
+            torrc.country.example README.md README.zh-CN.md LICENSE \
+            "dist/$package/"
           dylibbundler -od -b -x "dist/$package/tor" \
             -d "dist/$package/lib" -p '@executable_path/lib/'
           tar -C dist -czf "dist/$package.tar.gz" "$package"
@@ -173,7 +175,8 @@ jobs:
           cp src/app/tor.exe src/config/geoip src/config/geoip6 \
             country-data/exit-countries \
             scripts/maint/update_exit_country_map.py \
-            torrc.country.example README.md LICENSE "dist/$package/"
+            torrc.country.example README.md README.zh-CN.md LICENSE \
+            "dist/$package/"
           ldd src/app/tor.exe | awk '/\/ucrt64\/bin\// { print $3 }' | \
             while read -r dll; do cp "$dll" "dist/$package/"; done
       - name: Create zip

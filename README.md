@@ -1,5 +1,7 @@
 # Tor Country Router
 
+[English](README.md) | [简体中文](README.zh-CN.md)
+
 This fork routes each authenticated SOCKS5 clearnet stream through an exit
 relay in the country named by its username. One Tor process and one SOCKS port
 can serve multiple countries concurrently without changing `ExitNodes` or
