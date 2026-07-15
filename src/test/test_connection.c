@@ -23,6 +23,7 @@
 #include "core/or/connection_or.h"
 #include "lib/net/resolve.h"
 #include "lib/evloop/compat_libevent.h"
+#include "lib/fs/files.h"
 #include "lib/geoip/geoip.h"
 
 #include "test/test_connection.h"
@@ -1018,7 +1019,7 @@ test_conn_country_exit_constraint(void *arg)
   tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 1);
 
  done:
-  unlink(geoip_fname);
+  tor_unlink(geoip_fname);
   ;
 }
 
