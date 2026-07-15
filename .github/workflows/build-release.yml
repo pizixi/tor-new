@@ -21,11 +21,37 @@ env:
     --disable-libscrypt
 
 jobs:
-  linux:
-    name: Linux x86-64
+  country-data:
+    name: Build strict exit-country map
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v5
+      - name: Test map generator
+        run: python3 scripts/maint/test_update_exit_country_map.py
+      - name: Build map from observed exit addresses
+        run: |
+          python3 scripts/maint/update_exit_country_map.py \
+            --geoip src/config/geoip \
+            --geoip6 src/config/geoip6 \
+            --output exit-countries
+          entries="$(grep -cv '^#' exit-countries)"
+          echo "Generated $entries strict exit-country mappings"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-exit-country-map
+          path: exit-countries
+          if-no-files-found: error
+
+  linux:
+    name: Linux x86-64
+    runs-on: ubuntu-22.04
+    needs: country-data
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-exit-country-map
+          path: country-data
       - name: Preserve release-generated build files
         run: |
           touch aclocal.m4
@@ -47,6 +73,8 @@ jobs:
           package="${PACKAGE_PREFIX}-linux-x86_64"
           mkdir -p "dist/$package"
           cp src/app/tor src/config/geoip src/config/geoip6 \
+            country-data/exit-countries \
+            scripts/maint/update_exit_country_map.py \
             torrc.country.example README.md LICENSE "dist/$package/"
           tar -C dist -czf "dist/$package.tar.gz" "$package"
       - uses: actions/upload-artifact@v4
@@ -66,8 +94,13 @@ jobs:
           - runner: macos-15
             arch: arm64
     runs-on: ${{ matrix.runner }}
+    needs: country-data
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-exit-country-map
+          path: country-data
       - name: Preserve release-generated build files
         run: |
           touch aclocal.m4
@@ -90,6 +123,8 @@ jobs:
           package="${PACKAGE_PREFIX}-macos-${{ matrix.arch }}"
           mkdir -p "dist/$package"
           cp src/app/tor src/config/geoip src/config/geoip6 \
+            country-data/exit-countries \
+            scripts/maint/update_exit_country_map.py \
             torrc.country.example README.md LICENSE "dist/$package/"
           dylibbundler -od -b -x "dist/$package/tor" \
             -d "dist/$package/lib" -p '@executable_path/lib/'
@@ -103,8 +138,13 @@ jobs:
   windows:
     name: Windows x86-64
     runs-on: windows-2022
+    needs: country-data
     steps:
       - uses: actions/checkout@v5
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-exit-country-map
+          path: country-data
       - uses: msys2/setup-msys2@v2
         with:
           msystem: UCRT64
@@ -131,6 +171,8 @@ jobs:
           package="${PACKAGE_PREFIX}-windows-x86_64"
           mkdir -p "dist/$package"
           cp src/app/tor.exe src/config/geoip src/config/geoip6 \
+            country-data/exit-countries \
+            scripts/maint/update_exit_country_map.py \
             torrc.country.example README.md LICENSE "dist/$package/"
           ldd src/app/tor.exe | awk '/\/ucrt64\/bin\// { print $3 }' | \
             while read -r dll; do cp "$dll" "dist/$package/"; done

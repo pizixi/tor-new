@@ -947,6 +947,8 @@ nodelist_purge(void)
 void
 nodelist_free_all(void)
 {
+  country_exit_map_clear();
+
   if (PREDICT_UNLIKELY(the_nodelist == NULL))
     return;
 

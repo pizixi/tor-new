@@ -4788,8 +4788,13 @@ connection_ap_can_use_exit(const entry_connection_t *conn,
   }
 
   if (conn->socks_request->country_routing) {
-    const char *exit_country = exit_node->country >= 0 ?
-      geoip_get_country_name(exit_node->country) : NULL;
+    country_t country = exit_node->country;
+    const char *exit_country;
+    if (options->SocksCountryStrict &&
+        !country_exit_map_get(exit_node, &country)) {
+      return 0;
+    }
+    exit_country = country >= 0 ? geoip_get_country_name(country) : NULL;
     if (!exit_country ||
         strcasecmp(exit_country, conn->socks_request->country_code)) {
       return 0;

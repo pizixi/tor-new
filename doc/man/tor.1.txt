@@ -1670,6 +1670,19 @@ The following options are useful only for clients (that is, if
     not encrypt credentials, so do not expose the SocksPort over an untrusted
     network. (Default: 123456)
 
+[[SocksCountryStrict]] **SocksCountryStrict** **0**|**1**::
+    When enabled, country-routed streams only use relays present in
+    SocksCountryExitMapFile. The mapped country is derived from IP addresses
+    recently observed carrying exit traffic, rather than the relay's published
+    OR address. A relay with no observation or conflicting observed countries
+    is rejected instead of falling back to the OR-address country. (Default: 0)
+
+[[SocksCountryExitMapFile]] **SocksCountryExitMapFile** __filename__::
+    File mapping relay RSA fingerprints to strict exit countries. Each data
+    line contains a 40-character hexadecimal fingerprint, a two-letter country
+    code, and optionally a comma-separated diagnostic list of observed exit
+    addresses. This option is required when SocksCountryStrict is enabled.
+
 [[TokenBucketRefillInterval]] **TokenBucketRefillInterval** __NUM__ [**msec**|**second**]::
     Set the refill delay interval of Tor's token bucket to NUM milliseconds.
     NUM must be between 1 and 1000, inclusive.  When Tor is out of bandwidth,

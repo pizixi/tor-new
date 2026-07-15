@@ -10,8 +10,9 @@ Country routing is enabled by default. The default shared password is
 
 ## Quick start
 
-Release archives include the Tor binary, `geoip`, `geoip6`, and
-`torrc.country.example`. Start Tor from the extracted directory:
+Release archives include the Tor binary, `geoip`, `geoip6`, the generated
+`exit-countries` strict map, its updater, and `torrc.country.example`. Start
+Tor from the extracted directory:
 
 ```sh
 ./tor -f torrc.country.example
@@ -35,8 +36,12 @@ curl.exe -x socks5h://ca:123456@127.0.0.1:9050 https://myip.ipip.net
 Country codes are case-insensitive. `socks5h` is important because it keeps
 DNS resolution inside Tor. If no relay in the requested country can reach the
 destination port, Tor fails the stream instead of using a different country.
-The country decision uses the bundled Tor GeoIP database and the exit relay's
-published IPv4 address.
+The release configuration enables strict mode. It uses Tor Project exit
+scanner observations to classify the address that a relay actually exits
+from, rather than trusting only the relay's published OR address. Relays with
+missing, unknown, or conflicting observations are rejected. GeoIP providers
+can still disagree on hosting networks, so no database can guarantee that
+every third-party IP-check site uses the same label.
 
 ## Configuration
 
@@ -45,6 +50,8 @@ The new options are:
 ```text
 SocksCountryRouting 1
 SocksCountryPassword 123456
+SocksCountryStrict 1
+SocksCountryExitMapFile exit-countries
 ```
 
 When `SocksCountryRouting` is enabled, the SOCKS listener requires RFC1929
@@ -54,6 +61,21 @@ standard `IsolateSOCKSAuth` behavior.
 
 Keep `SocksPort` bound to localhost unless the network path to every client is
 trusted: SOCKS5 credentials are transmitted without encryption.
+
+`SocksCountryStrict 1` is recommended for accuracy. Set it to `0` to restore
+the original behavior based on each relay's published OR-address country;
+that mode usually has more exits for small countries but can return an exit IP
+that external GeoIP services place elsewhere. Strict mode never falls back to
+the original classification. Refresh observations from the extracted release
+directory with Python 3:
+
+```sh
+python3 update_exit_country_map.py --geoip geoip --geoip6 geoip6 \
+  --output exit-countries
+```
+
+Restart Tor after updating the map, or send SIGHUP on platforms that support
+it. If the update fails, the script leaves the previous map unchanged.
 
 ## Build and test
 
@@ -70,9 +92,11 @@ make check
 ## Automated releases
 
 `.github/workflows/build-release.yml` builds and tests Linux x86-64, builds
-macOS x86-64 and arm64, and builds Windows x86-64. Every build uploads a
-portable archive as a workflow artifact. Pushing a tag matching `v*` also
-creates a GitHub Release containing all archives and `SHA256SUMS`.
+macOS x86-64 and arm64, and builds Windows x86-64. It generates one strict map
+from current Tor Project observations and packages the identical map on every
+platform. Every build uploads a portable archive as a workflow artifact.
+Pushing a tag matching `v*` also creates a GitHub Release containing all
+archives and `SHA256SUMS`.
 
 This project is based on Tor 0.4.9.11. See `LICENSE` for licensing terms and
 the upstream Tor documentation under `doc/` for general Tor operation.

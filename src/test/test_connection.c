@@ -19,6 +19,7 @@
 #include "feature/nodelist/microdesc.h"
 #include "feature/nodelist/nodelist.h"
 #include "feature/nodelist/networkstatus.h"
+#include "feature/nodelist/routerset.h"
 #include "feature/dircommon/directory.h"
 #include "core/or/connection_or.h"
 #include "lib/net/resolve.h"
@@ -1023,6 +1024,72 @@ test_conn_country_exit_constraint(void *arg)
   ;
 }
 
+static void
+test_conn_country_exit_map(void *arg)
+{
+  or_options_t *options = get_options_mutable();
+  char *saved_map_file = options->SocksCountryExitMapFile;
+  int saved_strict = options->SocksCountryStrict;
+  entry_connection_t conn;
+  socks_request_t request;
+  node_t exit_node;
+  const char *geoip_fname = get_fname("country_map_geoip");
+  const char *map_fname = get_fname("country_exit_map");
+  const char fingerprint[] = "1111111111111111111111111111111111111111";
+  char *map_contents = NULL;
+  country_t us = -1;
+  country_t jp = -1;
+  (void)arg;
+
+  options->SocksCountryExitMapFile = NULL;
+  options->SocksCountryStrict = 0;
+  tt_int_op(write_str_to_file(geoip_fname,
+                              "0,100,US\n101,200,JP\n", 1), OP_EQ, 0);
+  tt_int_op(geoip_load_file(AF_INET, geoip_fname, LOG_WARN), OP_EQ, 0);
+  us = geoip_get_country("us");
+  jp = geoip_get_country("jp");
+  tor_asprintf(&map_contents, "invalid line\n%s us 8.8.8.8\n",
+               fingerprint);
+  tt_int_op(write_str_to_file(map_fname, map_contents, 1), OP_EQ, 0);
+  options->SocksCountryExitMapFile = tor_strdup(map_fname);
+  options->SocksCountryStrict = 1;
+  tt_int_op(country_exit_map_load(map_fname), OP_EQ, 0);
+  tt_assert(country_exit_map_is_loaded());
+
+  memset(&conn, 0, sizeof(conn));
+  memset(&request, 0, sizeof(request));
+  memset(&exit_node, 0, sizeof(exit_node));
+  memset(exit_node.identity, 0x11, sizeof(exit_node.identity));
+  conn.socks_request = &request;
+  request.country_routing = 1;
+  strlcpy(request.country_code, "us", sizeof(request.country_code));
+
+  /* The observed exit country overrides the relay's OR-address country. */
+  exit_node.country = jp;
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 1);
+  strlcpy(request.country_code, "jp", sizeof(request.country_code));
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 0);
+
+  /* A configured map is strict: unobserved relays must not fall back. */
+  strlcpy(request.country_code, "us", sizeof(request.country_code));
+  memset(exit_node.identity, 0x22, sizeof(exit_node.identity));
+  exit_node.country = us;
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 0);
+
+  /* With strict mode disabled, the OR-address GeoIP behavior remains. */
+  options->SocksCountryStrict = 0;
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 1);
+
+ done:
+  country_exit_map_clear();
+  tor_free(options->SocksCountryExitMapFile);
+  options->SocksCountryExitMapFile = saved_map_file;
+  options->SocksCountryStrict = saved_strict;
+  tor_free(map_contents);
+  tor_unlink(geoip_fname);
+  tor_unlink(map_fname);
+}
+
 #ifndef COCCI
 #define CONNECTION_TESTCASE(name, fork, setup)                           \
   { #name, test_conn_##name, fork, &setup, NULL }
@@ -1059,5 +1126,6 @@ struct testcase_t connection_tests[] = {
   { "describe", test_conn_describe, TT_FORK, NULL, NULL },
   { "country_exit_constraint", test_conn_country_exit_constraint,
     TT_FORK, NULL, NULL },
+  { "country_exit_map", test_conn_country_exit_map, TT_FORK, NULL, NULL },
   END_OF_TESTCASES
 };

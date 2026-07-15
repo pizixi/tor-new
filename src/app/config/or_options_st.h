@@ -153,6 +153,12 @@ struct or_options_t {
   int SocksCountryRouting;
   /** Shared password accepted by country-routed SOCKS5 requests. */
   char *SocksCountryPassword;
+  /** Optional strict map from relay fingerprints to recently observed
+   * actual exit-address countries. */
+  char *SocksCountryExitMapFile;
+  /** Reject relays absent from SocksCountryExitMapFile instead of using the
+   * published OR-address country. */
+  int SocksCountryStrict;
   struct config_line_t *DirPolicy; /**< Lists of dir policy components */
   /** Local address to bind outbound sockets */
   struct config_line_t *OutboundBindAddress;

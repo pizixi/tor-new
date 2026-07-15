@@ -36,7 +36,9 @@
 #include "feature/nodelist/routerset.h"
 #include "lib/conf/conftypes.h"
 #include "lib/confmgt/typedvar.h"
+#include "lib/encoding/binascii.h"
 #include "lib/encoding/confline.h"
+#include "lib/fs/files.h"
 #include "lib/geoip/geoip.h"
 
 #include "core/or/addr_policy_st.h"
@@ -45,6 +47,123 @@
 #include "feature/nodelist/routerinfo_st.h"
 #include "feature/nodelist/routerstatus_st.h"
 #include "lib/confmgt/var_type_def_st.h"
+
+/** Map relay RSA identity digests to countries determined from recently
+ * observed exit addresses.  When configured, this map is intentionally an
+ * allowlist: relays absent from it are not eligible for country routing. */
+static digestmap_t *country_exit_map = NULL;
+
+/** Clear the strict, observed-exit country map. */
+void
+country_exit_map_clear(void)
+{
+  digestmap_free(country_exit_map, tor_free_);
+  country_exit_map = NULL;
+}
+
+/** Return true if an observed-exit country map has been loaded. */
+int
+country_exit_map_is_loaded(void)
+{
+  return country_exit_map != NULL;
+}
+
+/** Load a strict country map. Each non-comment line has the form
+ * "fingerprint country [observed-addresses]". The final field is retained in
+ * the file for diagnostics but Tor only needs the fingerprint and country.
+ * Malformed lines are ignored. Return 0 on success and -1 on read failure. */
+int
+country_exit_map_load(const char *filename)
+{
+  digestmap_t *new_map = NULL;
+  smartlist_t *lines = NULL;
+  char *contents = NULL;
+  int loaded = 0;
+  int ignored = 0;
+
+  tor_assert(filename);
+  contents = read_file_to_str(filename, 0, NULL);
+  if (!contents) {
+    country_exit_map_clear();
+    return -1;
+  }
+
+  new_map = digestmap_new();
+  lines = smartlist_new();
+  smartlist_split_string(lines, contents, "\n",
+                         SPLIT_SKIP_SPACE | SPLIT_IGNORE_BLANK, 0);
+  SMARTLIST_FOREACH_BEGIN(lines, char *, line) {
+    smartlist_t *fields;
+    const char *fingerprint;
+    const char *country_code;
+    char digest[DIGEST_LEN];
+    country_t country;
+    country_t *country_ptr;
+    country_t *old_country;
+
+    if (line[0] == '#')
+      continue;
+    fields = smartlist_new();
+    smartlist_split_string(fields, line, NULL,
+                           SPLIT_SKIP_SPACE | SPLIT_IGNORE_BLANK, 0);
+    if (smartlist_len(fields) < 2 || smartlist_len(fields) > 3) {
+      ++ignored;
+      goto next_line;
+    }
+    fingerprint = smartlist_get(fields, 0);
+    country_code = smartlist_get(fields, 1);
+    if (fingerprint[0] == '$')
+      ++fingerprint;
+    if (strlen(fingerprint) != HEX_DIGEST_LEN ||
+        base16_decode(digest, sizeof(digest), fingerprint,
+                      HEX_DIGEST_LEN) != DIGEST_LEN ||
+        strlen(country_code) != 2 ||
+        !TOR_ISALPHA(country_code[0]) ||
+        !TOR_ISALPHA(country_code[1]) ||
+        (country = geoip_get_country(country_code)) <= 0) {
+      ++ignored;
+      goto next_line;
+    }
+    country_ptr = tor_malloc(sizeof(*country_ptr));
+    *country_ptr = country;
+    old_country = digestmap_set(new_map, digest, country_ptr);
+    tor_free(old_country);
+    ++loaded;
+
+  next_line:
+    SMARTLIST_FOREACH(fields, char *, field, tor_free(field));
+    smartlist_free(fields);
+  } SMARTLIST_FOREACH_END(line);
+
+  country_exit_map_clear();
+  country_exit_map = new_map;
+  log_notice(LD_CONFIG,
+             "Loaded %d recently observed exit-country mappings from %s%s.",
+             loaded, filename, ignored ? " (some invalid lines ignored)" : "");
+
+  SMARTLIST_FOREACH(lines, char *, line, tor_free(line));
+  smartlist_free(lines);
+  tor_free(contents);
+  return 0;
+}
+
+/** Look up the country derived from a relay's recently observed actual exit
+ * address. Return 1 on success, or 0 if the map has no entry for the relay. */
+int
+country_exit_map_get(const node_t *node, country_t *country_out)
+{
+  const country_t *country_ptr;
+
+  tor_assert(node);
+  tor_assert(country_out);
+  if (!country_exit_map)
+    return 0;
+  country_ptr = digestmap_get(country_exit_map, node->identity);
+  if (!country_ptr)
+    return 0;
+  *country_out = *country_ptr;
+  return 1;
+}
 
 /** Return a new empty routerset. */
 routerset_t *

@@ -44,6 +44,11 @@ void routerset_free_(routerset_t *routerset);
 #define routerset_free(rs) FREE_AND_NULL(routerset_t, routerset_free_, (rs))
 int routerset_len(const routerset_t *set);
 
+int country_exit_map_load(const char *filename);
+void country_exit_map_clear(void);
+int country_exit_map_is_loaded(void);
+int country_exit_map_get(const node_t *node, country_t *country_out);
+
 struct var_type_def_t;
 extern const struct var_type_def_t ROUTERSET_type_defn;
 typedef routerset_t *config_decl_ROUTERSET;

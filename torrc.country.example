@@ -4,6 +4,12 @@ SocksPort 127.0.0.1:9050 IsolateSOCKSAuth
 SocksCountryRouting 1
 SocksCountryPassword 123456
 
+# Strict mode uses recent Tor Project observations of the IP address that
+# each relay actually exits from. Set this to 0 to use the legacy OR-address
+# GeoIP classification, which has more coverage but lower accuracy.
+SocksCountryStrict 1
+SocksCountryExitMapFile exit-countries
+
 # These paths are relative to the directory where Tor is started.
 DataDirectory data
 GeoIPFile geoip

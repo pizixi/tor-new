@@ -669,8 +669,10 @@ static const config_var_t option_vars_[] = {
   V(Schedulers,                  CSV,      "KIST,KISTLite,Vanilla"),
   V(ShutdownWaitLength,          INTERVAL, "30 seconds"),
   OBSOLETE("SocksListenAddress"),
+  V(SocksCountryExitMapFile,    FILENAME, NULL),
   V(SocksCountryPassword,       STRING,   "123456"),
   V(SocksCountryRouting,        BOOL,     "1"),
+  V(SocksCountryStrict,         BOOL,     "0"),
   V(SocksPolicy,                 LINELIST, NULL),
   VPORT(SocksPort),
   V(SocksTimeout,                INTERVAL, "2 minutes"),
@@ -3867,6 +3869,12 @@ options_validate_cb(const void *old_options_, void *options_, char **msg)
     if (len < 1 || len > MAX_SOCKS5_AUTH_FIELD_SIZE) {
       REJECT("SocksCountryPassword must be between 1 and 255 characters "
              "when SocksCountryRouting is enabled.");
+    }
+    if (options->SocksCountryStrict &&
+        (!options->SocksCountryExitMapFile ||
+         !options->SocksCountryExitMapFile[0])) {
+      REJECT("SocksCountryExitMapFile must be configured when "
+             "SocksCountryStrict is enabled.");
     }
   }
 
@@ -7504,6 +7512,19 @@ config_maybe_load_geoip_files_(const or_options_t *options,
                                    options->GeoIPv6File))
        || !geoip_is_loaded(AF_INET6))) {
     config_load_geoip_file_(AF_INET6, options->GeoIPv6File, "geoip6");
+  }
+
+  /* Unlike the GeoIP files, reload this map even when its path is unchanged.
+   * This lets an operator replace it and apply SIGHUP without restarting. */
+  if (options->SocksCountryExitMapFile) {
+    if (country_exit_map_load(
+            options->SocksCountryExitMapFile) < 0) {
+      log_warn(LD_CONFIG,
+               "Country routing will reject all exits until "
+               "SocksCountryExitMapFile can be loaded.");
+    }
+  } else {
+    country_exit_map_clear();
   }
 }
 
