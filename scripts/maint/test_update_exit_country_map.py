@@ -9,7 +9,8 @@ import tempfile
 import unittest
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
-from update_exit_country_map import GeoIPIndex, build_entries, render
+from update_exit_country_map import (GeoIPIndex, build_entries,
+                                     collect_addresses, render)
 
 
 class ExitCountryMapTest(unittest.TestCase):
@@ -50,26 +51,49 @@ class ExitCountryMapTest(unittest.TestCase):
                 },
                 {"fingerprint": "D" * 40, "exit_addresses": ["10.0.0.1"]},
                 {"fingerprint": "E" * 40, "exit_addresses": []},
+                {"fingerprint": "F" * 40, "exit_addresses": ["8.8.8.10"]},
+                {"fingerprint": "0" * 40, "exit_addresses": ["8.8.8.11"]},
                 {"fingerprint": "invalid", "exit_addresses": ["8.8.8.8"]},
             ]
         }
-        entries, counters = build_entries(document, self.geoip4, self.geoip6)
+        consensus = {
+            "8.8.8.8": "us",
+            "8.8.8.9": "us",
+            "2001:4860::1": "us",
+            "9.9.9.9": "de",
+            "8.8.8.10": "de",
+        }
+        entries, counters = build_entries(
+            document, self.geoip4, self.geoip6, consensus
+        )
         self.assertEqual([entry[0] for entry in entries], ["A" * 40, "B" * 40])
         self.assertTrue(all(entry[1] == "us" for entry in entries))
         self.assertEqual(counters["included"], 2)
         self.assertEqual(counters["conflicting_country"], 1)
         self.assertEqual(counters["unknown_country"], 1)
         self.assertEqual(counters["no_observation"], 1)
+        self.assertEqual(counters["provider_conflict"], 1)
+        self.assertEqual(counters["provider_missing"], 1)
         self.assertEqual(counters["invalid"], 1)
+
+    def test_collect_addresses_normalizes_and_deduplicates(self):
+        document = {"relays": [{"exit_addresses": [
+            "2001:4860:0:0:0:0:0:1", "2001:4860::1", "8.8.8.8", "bad"
+        ]}]}
+        self.assertEqual(
+            collect_addresses(document), ["8.8.8.8", "2001:4860::1"]
+        )
 
     def test_render_is_stable_and_diagnostic(self):
         stamp = datetime.datetime(2026, 7, 15, tzinfo=datetime.timezone.utc)
         output = render(
             [("A" * 40, "us", "8.8.8.8")],
             "fixture.json",
+            country_source="country-api",
             generated_at=stamp,
         )
         self.assertIn("# Generated: 2026-07-15T00:00:00Z", output)
+        self.assertIn("# Country consensus: country-api", output)
         self.assertIn("A" * 40 + " us 8.8.8.8\n", output)
 
 

@@ -18,6 +18,7 @@ from pathlib import Path
 import re
 import tempfile
 import time
+import urllib.error
 import urllib.request
 
 
@@ -25,6 +26,7 @@ DEFAULT_URL = (
     "https://onionoo.torproject.org/details?flag=Exit&running=true&"
     "fields=fingerprint%2Cexit_addresses"
 )
+DEFAULT_COUNTRY_API = "http://ip-api.com/batch"
 FINGERPRINT_RE = re.compile(r"^[0-9A-Fa-f]{40}$")
 
 
@@ -86,7 +88,87 @@ def download_json(url, attempts=5):
     raise RuntimeError("unable to download Onionoo exit details") from last_error
 
 
-def build_entries(document, geoip4, geoip6):
+def collect_addresses(document):
+    """Return normalized, unique exit addresses from an Onionoo document."""
+    addresses = set()
+    for relay in document.get("relays", []):
+        for address in relay.get("exit_addresses") or []:
+            try:
+                addresses.add(str(ipaddress.ip_address(address)))
+            except ValueError:
+                pass
+    return sorted(
+        addresses,
+        key=lambda item: (
+            ipaddress.ip_address(item).version,
+            ipaddress.ip_address(item),
+        ),
+    )
+
+
+def query_country_api(addresses, url=DEFAULT_COUNTRY_API):
+    """Look up countries in batches, respecting the service rate headers.
+
+    Results are used only as a consensus filter: they can exclude a relay but
+    never change the country assigned by Tor's bundled GeoIP data.
+    """
+    results = {}
+    batches = [
+        addresses[pos:pos + 100]
+        for pos in range(0, len(addresses), 100)
+    ]
+    for batch_number, batch in enumerate(batches):
+        payload = json.dumps([
+            {"query": address, "fields": "status,countryCode,query"}
+            for address in batch
+        ]).encode("ascii")
+        last_error = None
+        for attempt in range(5):
+            request = urllib.request.Request(
+                url,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "User-Agent": "tor-country-exit-map/1.0",
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(request, timeout=90) as response:
+                    response_items = json.load(response)
+                    remaining = int(response.headers.get("X-Rl", "1"))
+                    reset_after = int(response.headers.get("X-Ttl", "0"))
+                for item in response_items:
+                    country = (item.get("countryCode") or "").lower()
+                    address = item.get("query")
+                    if (
+                        item.get("status") == "success" and address and
+                        len(country) == 2 and country.isalpha()
+                    ):
+                        try:
+                            normalized = str(ipaddress.ip_address(address))
+                        except ValueError:
+                            continue
+                        results[normalized] = country
+                if remaining <= 0 and batch_number + 1 < len(batches):
+                    time.sleep(max(reset_after, 1) + 1)
+                break
+            except urllib.error.HTTPError as exc:
+                last_error = exc
+                if exc.code != 429:
+                    raise
+                reset_after = int(exc.headers.get("X-Ttl", "60"))
+                time.sleep(max(reset_after, 1) + 1)
+            except Exception as exc:
+                last_error = exc
+                if attempt + 1 < 5:
+                    time.sleep(2 ** attempt)
+        else:
+            raise RuntimeError("country consensus lookup failed") from last_error
+    return results
+
+
+def build_entries(document, geoip4, geoip6, consensus_countries=None):
     """Return strict map entries and counters explaining excluded relays."""
     entries = []
     counters = {
@@ -95,6 +177,8 @@ def build_entries(document, geoip4, geoip6):
         "no_observation": 0,
         "unknown_country": 0,
         "conflicting_country": 0,
+        "provider_missing": 0,
+        "provider_conflict": 0,
         "invalid": 0,
     }
     for relay in document.get("relays", []):
@@ -109,6 +193,8 @@ def build_entries(document, geoip4, geoip6):
             continue
         countries = set()
         reliable = True
+        provider_missing = False
+        provider_conflict = False
         for address in addresses:
             try:
                 ip = ipaddress.ip_address(address)
@@ -120,8 +206,21 @@ def build_entries(document, geoip4, geoip6):
                 reliable = False
                 break
             countries.add(country)
+            if consensus_countries is not None:
+                normalized = str(ipaddress.ip_address(address))
+                provider_country = consensus_countries.get(normalized)
+                if provider_country is None:
+                    provider_missing = True
+                elif provider_country != country:
+                    provider_conflict = True
         if not reliable:
             counters["unknown_country"] += 1
+            continue
+        if provider_missing:
+            counters["provider_missing"] += 1
+            continue
+        if provider_conflict:
+            counters["provider_conflict"] += 1
             continue
         if len(countries) != 1:
             counters["conflicting_country"] += 1
@@ -133,7 +232,7 @@ def build_entries(document, geoip4, geoip6):
     return entries, counters
 
 
-def render(entries, source, generated_at=None):
+def render(entries, source, country_source=None, generated_at=None):
     """Render the map format consumed by Tor."""
     if generated_at is None:
         generated_at = datetime.datetime.now(datetime.timezone.utc)
@@ -142,6 +241,7 @@ def render(entries, source, generated_at=None):
         "# Strict Tor exit-country map.",
         "# Generated: " + stamp,
         "# Source: " + source,
+        "# Country consensus: " + (country_source or "disabled"),
         "# fingerprint country observed-exit-addresses",
     ]
     lines.extend("%s %s %s" % entry for entry in entries)
@@ -171,6 +271,11 @@ def parse_args():
     parser.add_argument("--geoip6", required=True, help="Tor IPv6 geoip6 file")
     parser.add_argument("--output", required=True, help="map file to replace")
     parser.add_argument("--url", default=DEFAULT_URL, help="Onionoo details URL")
+    parser.add_argument(
+        "--country-api",
+        default=DEFAULT_COUNTRY_API,
+        help="batch API used to reject GeoIP disagreements",
+    )
     parser.add_argument("--input-json", help="use saved Onionoo JSON instead")
     parser.add_argument(
         "--minimum-entries",
@@ -190,17 +295,21 @@ def main():
     else:
         document = download_json(args.url)
         source = args.url
+    consensus_countries = query_country_api(
+        collect_addresses(document), args.country_api
+    )
     entries, counters = build_entries(
         document,
         GeoIPIndex(args.geoip, 4),
         GeoIPIndex(args.geoip6, 6),
+        consensus_countries,
     )
     if len(entries) < args.minimum_entries:
         raise RuntimeError(
             "refusing to publish only %d mappings (minimum %d)"
             % (len(entries), args.minimum_entries)
         )
-    atomic_write(args.output, render(entries, source))
+    atomic_write(args.output, render(entries, source, args.country_api))
     print(json.dumps(counters, sort_keys=True))
 
 

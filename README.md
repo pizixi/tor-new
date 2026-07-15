@@ -38,10 +38,11 @@ DNS resolution inside Tor. If no relay in the requested country can reach the
 destination port, Tor fails the stream instead of using a different country.
 The release configuration enables strict mode. It uses Tor Project exit
 scanner observations to classify the address that a relay actually exits
-from, rather than trusting only the relay's published OR address. Relays with
-missing, unknown, or conflicting observations are rejected. GeoIP providers
-can still disagree on hosting networks, so no database can guarantee that
-every third-party IP-check site uses the same label.
+from, rather than trusting only the relay's published OR address. It then
+requires Tor's IPFire database and a second public GeoIP lookup to agree.
+Relays with missing, unknown, or conflicting results are rejected. This
+substantially reduces disagreement with IP-check sites, though no independent
+provider can guarantee identical data at every moment.
 
 ## Configuration
 
@@ -66,8 +67,9 @@ trusted: SOCKS5 credentials are transmitted without encryption.
 the original behavior based on each relay's published OR-address country;
 that mode usually has more exits for small countries but can return an exit IP
 that external GeoIP services place elsewhere. Strict mode never falls back to
-the original classification. Refresh observations from the extracted release
-directory with Python 3:
+the original classification. The updater needs access to Onionoo and the
+country-consensus API. Refresh the map from the extracted release directory
+with Python 3:
 
 ```sh
 python3 update_exit_country_map.py --geoip geoip --geoip6 geoip6 \
@@ -93,8 +95,9 @@ make check
 
 `.github/workflows/build-release.yml` builds and tests Linux x86-64, builds
 macOS x86-64 and arm64, and builds Windows x86-64. It generates one strict map
-from current Tor Project observations and packages the identical map on every
-platform. Every build uploads a portable archive as a workflow artifact.
+from current Tor Project observations, rejects GeoIP-provider disagreements,
+and packages the identical map on every platform. Every build uploads a
+portable archive as a workflow artifact.
 Pushing a tag matching `v*` also creates a GitHub Release containing all
 archives and `SHA256SUMS`.
 
