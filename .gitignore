@@ -1,0 +1,33 @@
+# Local configure and build output. Generated distribution files already in
+# this repository (configure, Makefile.in, and orconfig.h.in) stay tracked.
+/Makefile
+/orconfig.h
+/config.log
+/config.status
+/stamp-h1
+/Doxyfile
+/micro-revision.i
+/warning_flags
+.libs/
+.deps/
+.dirstamp
+*.Po
+*.Plo
+*.o
+*.obj
+*.lo
+*.la
+*.a
+*.exe
+*.log
+*.trs
+*.pyc
+__pycache__/
+/src/app/tor
+/src/test/test
+/data/
+/dist/
+/contrib/operator-tools/tor.logrotate
+/scripts/maint/checkOptionDocs.pl
+/src/config/torrc.minimal
+/src/config/torrc.sample

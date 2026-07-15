@@ -23,6 +23,7 @@
 #include "core/or/connection_or.h"
 #include "lib/net/resolve.h"
 #include "lib/evloop/compat_libevent.h"
+#include "lib/geoip/geoip.h"
 
 #include "test/test_connection.h"
 #include "test/test_helpers.h"
@@ -976,6 +977,51 @@ test_conn_describe(void *arg)
   connection_free_minimal(conn);
 }
 
+static void
+test_conn_country_exit_constraint(void *arg)
+{
+  entry_connection_t conn;
+  socks_request_t request;
+  node_t exit_node;
+  const char *geoip_fname = get_fname("country_exit_geoip");
+  country_t us = -1;
+  country_t jp = -1;
+  (void)arg;
+
+  tt_int_op(write_str_to_file(geoip_fname,
+                              "0,100,US\n101,200,JP\n", 1), OP_EQ, 0);
+  tt_int_op(geoip_load_file(AF_INET, geoip_fname, LOG_WARN), OP_EQ, 0);
+  us = geoip_get_country("us");
+  jp = geoip_get_country("jp");
+
+  memset(&conn, 0, sizeof(conn));
+  memset(&request, 0, sizeof(request));
+  memset(&exit_node, 0, sizeof(exit_node));
+  conn.socks_request = &request;
+  request.country_routing = 1;
+  strlcpy(request.country_code, "us", sizeof(request.country_code));
+
+  tt_int_op(us, OP_GT, 0);
+  tt_int_op(jp, OP_GT, 0);
+  tt_int_op(us, OP_NE, jp);
+
+  exit_node.country = us;
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 1);
+
+  exit_node.country = jp;
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 0);
+
+  exit_node.country = -1;
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 0);
+
+  request.country_routing = 0;
+  tt_int_op(connection_ap_can_use_exit(&conn, &exit_node), OP_EQ, 1);
+
+ done:
+  unlink(geoip_fname);
+  ;
+}
+
 #ifndef COCCI
 #define CONNECTION_TESTCASE(name, fork, setup)                           \
   { #name, test_conn_##name, fork, &setup, NULL }
@@ -1010,5 +1056,7 @@ struct testcase_t connection_tests[] = {
   //CONNECTION_TESTCASE(func_suffix, TT_FORK, setup_func_pair),
   { "failed_orconn_tracker", test_failed_orconn_tracker, TT_FORK, NULL, NULL },
   { "describe", test_conn_describe, TT_FORK, NULL, NULL },
+  { "country_exit_constraint", test_conn_country_exit_constraint,
+    TT_FORK, NULL, NULL },
   END_OF_TESTCASES
 };

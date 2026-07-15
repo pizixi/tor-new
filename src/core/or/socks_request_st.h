@@ -67,6 +67,8 @@ struct socks_request_t {
   unsigned int socks_prefer_no_auth : 1;
   /** If set, we can send back the extended error code in the reply. */
   unsigned int socks_use_extended_errors : 1;
+  /** Set after this request authenticates for country-based exit routing. */
+  unsigned int country_routing : 1;
   /** If non zero, this contains the extended error code that should be used
    * if the port was configured to use them. */
   socks5_reply_status_t socks_extended_error_code;
@@ -82,6 +84,9 @@ struct socks_request_t {
   /** The negotiated password value if any (for socks5). This value is NOT
    * nul-terminated; see passwordlen for its length. */
   char *password;
+
+  /** Lowercase ISO 3166-1 alpha-2 code requested by the SOCKS username. */
+  char country_code[3];
 
   uint8_t socks5_atyp; /* SOCKS5 address type */
 };

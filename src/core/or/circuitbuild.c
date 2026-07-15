@@ -82,6 +82,7 @@
 #include "feature/nodelist/node_st.h"
 #include "core/or/or_circuit_st.h"
 #include "core/or/origin_circuit_st.h"
+#include "core/or/socks_request_st.h"
 
 #include "trunnel/extension.h"
 #include "trunnel/congestion_control.h"
@@ -1833,6 +1834,50 @@ choose_good_exit_server_general(router_crn_flags_t flags)
              ", except possibly those excluded by your configuration, " : "");
   }
   return NULL;
+}
+
+/** Pick an exit for a country-routed stream. Unlike the general exit
+ * chooser, this function never falls back to a node that cannot carry the
+ * stream that caused the circuit launch. */
+const node_t *
+choose_country_exit_server(const entry_connection_t *conn, int flags)
+{
+  const or_options_t *options = get_options();
+  smartlist_t *supporting = smartlist_new();
+  const node_t *selected_node;
+
+  tor_assert(conn);
+  tor_assert(conn->socks_request);
+  tor_assert(conn->socks_request->country_routing);
+
+  flags |= CRN_NEED_DESC;
+  SMARTLIST_FOREACH_BEGIN(nodelist_get_list(), const node_t *, node) {
+    if (router_digest_is_me(node->identity) ||
+        !router_can_choose_node(node, flags) ||
+        node->is_bad_exit || node_exit_policy_rejects_all(node) ||
+        routerset_contains_node(options->ExcludeExitNodesUnion_, node) ||
+        (options->ExitNodes &&
+         !routerset_contains_node(options->ExitNodes, node)) ||
+        !connection_ap_can_use_exit(conn, node)) {
+      continue;
+    }
+    smartlist_add(supporting, (void *)node);
+  } SMARTLIST_FOREACH_END(node);
+
+  selected_node = node_sl_choose_by_bandwidth(supporting, WEIGHT_FOR_EXIT);
+  smartlist_free(supporting);
+
+  if (!selected_node &&
+      (flags & (CRN_NEED_UPTIME | CRN_NEED_CAPACITY))) {
+    return choose_country_exit_server(
+        conn, flags & ~(CRN_NEED_UPTIME | CRN_NEED_CAPACITY));
+  }
+  if (selected_node) {
+    log_info(LD_CIRC, "Chose %s exit server '%s'",
+             conn->socks_request->country_code,
+             node_describe(selected_node));
+  }
+  return selected_node;
 }
 
 /*

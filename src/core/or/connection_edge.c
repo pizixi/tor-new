@@ -107,6 +107,7 @@
 #include "lib/crypt_ops/crypto_rand.h"
 #include "lib/crypt_ops/crypto_util.h"
 #include "lib/encoding/confline.h"
+#include "lib/geoip/geoip.h"
 
 #include "core/or/cell_st.h"
 #include "core/or/cpath_build_state_st.h"
@@ -4784,6 +4785,15 @@ connection_ap_can_use_exit(const entry_connection_t *conn,
   if (conn->use_begindir) {
     /* Internal directory fetches do not count as exiting. */
     return 1;
+  }
+
+  if (conn->socks_request->country_routing) {
+    const char *exit_country = exit_node->country >= 0 ?
+      geoip_get_country_name(exit_node->country) : NULL;
+    if (!exit_country ||
+        strcasecmp(exit_country, conn->socks_request->country_code)) {
+      return 0;
+    }
   }
 
   if (conn->socks_request->command == SOCKS_COMMAND_CONNECT) {

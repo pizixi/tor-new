@@ -25,6 +25,7 @@ socks_test_setup(const struct testcase_t *testcase)
   (void)testcase;
   data->buf = buf_new_with_capacity(256);
   data->req = socks_request_new();
+  get_options_mutable()->SocksCountryRouting = 0;
   config_register_addressmaps(get_options());
   return data;
 }
@@ -511,6 +512,112 @@ test_socks_5_authenticate(void *ptr)
 
   tt_mem_op("me",OP_EQ, socks->username, 2);
   tt_mem_op("mypasswd",OP_EQ, socks->password, 8);
+
+ done:
+  ;
+}
+
+static void
+enable_country_routing(const char *password)
+{
+  or_options_t *options = get_options_mutable();
+  options->SocksCountryRouting = 1;
+  tor_free(options->SocksCountryPassword);
+  options->SocksCountryPassword = tor_strdup(password);
+}
+
+/** Country routing accepts only authenticated SOCKS5 clients. */
+static void
+test_socks_4_country_rejected(void *ptr)
+{
+  SOCKS_TEST_INIT();
+  enable_country_routing("123456");
+
+  ADD_DATA(buf, "\x04\x01\x11\x12\x02\x02\x02\x03\x00");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, -1);
+  tt_assert(!socks->country_routing);
+
+ done:
+  ;
+}
+
+/** Country routing requires RFC1929 and records a normalized country code. */
+static void
+test_socks_5_country_authenticate(void *ptr)
+{
+  SOCKS_TEST_INIT();
+  enable_country_routing("123456");
+
+  ADD_DATA(buf, "\x05\x02\x00\x02");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, 0);
+  tt_int_op(socks->replylen, OP_EQ, 2);
+  tt_int_op(socks->reply[0], OP_EQ, 5);
+  tt_int_op(socks->reply[1], OP_EQ, SOCKS_USER_PASS);
+
+  ADD_DATA(buf, "\x01\x02JP\x06" "123456");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, 0);
+  tt_int_op(socks->replylen, OP_EQ, 2);
+  tt_int_op(socks->reply[0], OP_EQ, 1);
+  tt_int_op(socks->reply[1], OP_EQ, 0);
+  tt_assert(socks->country_routing);
+  tt_str_op(socks->country_code, OP_EQ, "jp");
+
+ done:
+  ;
+}
+
+/** Country routing rejects clients that do not offer RFC1929. */
+static void
+test_socks_5_country_requires_auth(void *ptr)
+{
+  SOCKS_TEST_INIT();
+  enable_country_routing("123456");
+
+  ADD_DATA(buf, "\x05\x01\x00");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, -1);
+  tt_int_op(socks->replylen, OP_EQ, 2);
+  tt_int_op(socks->reply[0], OP_EQ, 5);
+  tt_int_op(socks->reply[1], OP_EQ, 0xff);
+
+ done:
+  ;
+}
+
+/** Country routing rejects a wrong password without accepting the stream. */
+static void
+test_socks_5_country_rejects_credentials(void *ptr)
+{
+  SOCKS_TEST_INIT();
+  enable_country_routing("123456");
+
+  ADD_DATA(buf, "\x05\x01\x02");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, 0);
+  ADD_DATA(buf, "\x01\x02US\x06" "654321");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, -1);
+  tt_int_op(socks->replylen, OP_EQ, 2);
+  tt_int_op(socks->reply[0], OP_EQ, 1);
+  tt_int_op(socks->reply[1], OP_EQ, 1);
+  tt_assert(!socks->country_routing);
+
+ done:
+  ;
+}
+
+/** Country routing rejects usernames that are not two ASCII letters. */
+static void
+test_socks_5_country_rejects_invalid_code(void *ptr)
+{
+  SOCKS_TEST_INIT();
+  enable_country_routing("123456");
+
+  ADD_DATA(buf, "\x05\x01\x02");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, 0);
+  ADD_DATA(buf, "\x01\x03USA\x06" "123456");
+  tt_int_op(fetch_from_buf_socks(buf, socks, 0, 0), OP_EQ, -1);
+  tt_int_op(socks->replylen, OP_EQ, 2);
+  tt_int_op(socks->reply[0], OP_EQ, 1);
+  tt_int_op(socks->reply[1], OP_EQ, 1);
+  tt_assert(!socks->country_routing);
 
  done:
   ;
@@ -1166,6 +1273,7 @@ struct testcase_t socks_tests[] = {
   SOCKSENT(4_unsupported_commands),
   SOCKSENT(4_supported_commands),
   SOCKSENT(4_bad_arguments),
+  SOCKSENT(4_country_rejected),
 
   SOCKSENT(5_unsupported_commands),
   SOCKSENT(5_supported_commands),
@@ -1174,6 +1282,10 @@ struct testcase_t socks_tests[] = {
   SOCKSENT(5_auth_unsupported_version),
   SOCKSENT(5_auth_before_negotiation),
   SOCKSENT(5_authenticate),
+  SOCKSENT(5_country_authenticate),
+  SOCKSENT(5_country_requires_auth),
+  SOCKSENT(5_country_rejects_credentials),
+  SOCKSENT(5_country_rejects_invalid_code),
   SOCKSENT(5_authenticate_empty_user_pass),
   SOCKSENT(5_authenticate_with_data),
   SOCKSENT(5_authenticate_with_rpc_objectid),

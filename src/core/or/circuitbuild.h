@@ -53,6 +53,9 @@ MOCK_DECL(const node_t *,
           build_state_get_exit_node,(cpath_build_state_t *state));
 const char *build_state_get_exit_nickname(cpath_build_state_t *state);
 
+const node_t *choose_country_exit_server(const entry_connection_t *conn,
+                                         int flags);
+
 struct circuit_guard_state_t;
 
 const node_t *choose_good_entry_server(const origin_circuit_t *circ,

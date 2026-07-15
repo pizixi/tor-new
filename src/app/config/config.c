@@ -669,6 +669,8 @@ static const config_var_t option_vars_[] = {
   V(Schedulers,                  CSV,      "KIST,KISTLite,Vanilla"),
   V(ShutdownWaitLength,          INTERVAL, "30 seconds"),
   OBSOLETE("SocksListenAddress"),
+  V(SocksCountryPassword,       STRING,   "123456"),
+  V(SocksCountryRouting,        BOOL,     "1"),
   V(SocksPolicy,                 LINELIST, NULL),
   VPORT(SocksPort),
   V(SocksTimeout,                INTERVAL, "2 minutes"),
@@ -2003,7 +2005,10 @@ options_need_geoip_info(const or_options_t *options, const char **reason_out)
     routerset_needs_geoip(options->HSLayer2Nodes) ||
     routerset_needs_geoip(options->HSLayer3Nodes);
 
-  if (routerset_usage && reason_out) {
+  if (options->SocksCountryRouting && reason_out) {
+    *reason_out = "SocksCountryRouting needs GEOIP information to select "
+      "an exit in the country requested by each SOCKS5 username.";
+  } else if (routerset_usage && reason_out) {
     *reason_out = "We've been configured to use (or avoid) nodes in certain "
       "countries, and we need GEOIP information to figure out which ones they "
       "are.";
@@ -2012,7 +2017,7 @@ options_need_geoip_info(const or_options_t *options, const char **reason_out)
       "us as a bridge, and we need GEOIP information to tell which countries "
       "clients are in.";
   }
-  return bridge_usage || routerset_usage;
+  return options->SocksCountryRouting || bridge_usage || routerset_usage;
 }
 
 /* Used in the various options_transition_affects* functions. */
@@ -3855,6 +3860,15 @@ options_validate_cb(const void *old_options_, void *options_, char **msg)
       REJECT("Socks5ProxyPassword must be between 1 and 255 characters.");
   } else if (options->Socks5ProxyPassword)
     REJECT("Socks5ProxyPassword must be included with Socks5ProxyUsername.");
+
+  if (options->SocksCountryRouting) {
+    size_t len = options->SocksCountryPassword ?
+      strlen(options->SocksCountryPassword) : 0;
+    if (len < 1 || len > MAX_SOCKS5_AUTH_FIELD_SIZE) {
+      REJECT("SocksCountryPassword must be between 1 and 255 characters "
+             "when SocksCountryRouting is enabled.");
+    }
+  }
 
   if (options->HashedControlPassword) {
     smartlist_t *sl = decode_hashed_passwords(options->HashedControlPassword);

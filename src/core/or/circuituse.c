@@ -56,6 +56,7 @@
 #include "feature/hs/hs_stats.h"
 #include "feature/nodelist/describe.h"
 #include "feature/nodelist/networkstatus.h"
+#include "feature/nodelist/node_select.h"
 #include "feature/nodelist/nodelist.h"
 #include "feature/nodelist/routerlist.h"
 #include "feature/relay/routermode.h"
@@ -2527,6 +2528,26 @@ circuit_get_open_circ_or_launch(entry_connection_t *conn,
       if (want_onehop) flags |= CIRCLAUNCH_ONEHOP_TUNNEL;
       if (need_uptime) flags |= CIRCLAUNCH_NEED_UPTIME;
       if (need_internal) flags |= CIRCLAUNCH_IS_INTERNAL;
+
+      if (conn->socks_request->country_routing && !need_internal &&
+          !extend_info && new_circ_purpose == CIRCUIT_PURPOSE_C_GENERAL) {
+        int country_flags = CRN_NEED_DESC | CRN_NEED_CAPACITY;
+        const node_t *exit_node;
+        if (need_uptime)
+          country_flags |= CRN_NEED_UPTIME;
+        exit_node = choose_country_exit_server(conn, country_flags);
+        if (!exit_node) {
+          log_warn(LD_APP,
+                   "No usable exit in country '%s' allows %s:%d. Rejecting.",
+                   conn->socks_request->country_code,
+                   safe_str_client(conn->socks_request->address),
+                   conn->socks_request->port);
+          return -1;
+        }
+        extend_info = extend_info_from_node(exit_node, 0, 1);
+        if (!extend_info)
+          return -1;
+      }
 
       /* If we are about to pick a v3 RP right now, make sure we pick a
        * rendezvous point that supports the v3 protocol! */

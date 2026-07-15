@@ -1,0 +1,12 @@
+# Portable single-instance country-routing configuration.
+ClientOnly 1
+SocksPort 127.0.0.1:9050 IsolateSOCKSAuth
+SocksCountryRouting 1
+SocksCountryPassword 123456
+
+# These paths are relative to the directory where Tor is started.
+DataDirectory data
+GeoIPFile geoip
+GeoIPv6File geoip6
+
+Log notice stdout

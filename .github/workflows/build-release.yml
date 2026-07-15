@@ -1,0 +1,157 @@
+name: Build and release
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  PACKAGE_PREFIX: tor-country
+  CONFIGURE_FLAGS: >-
+    --disable-asciidoc
+    --disable-manpage
+    --disable-html-manual
+    --disable-seccomp
+    --disable-libscrypt
+
+jobs:
+  linux:
+    name: Linux x86-64
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y build-essential pkg-config libevent-dev \
+            libssl-dev zlib1g-dev liblzma-dev libzstd-dev
+      - name: Configure
+        run: ./configure $CONFIGURE_FLAGS
+      - name: Build
+        run: make -j"$(nproc)"
+      - name: Test
+        run: make check
+      - name: Package
+        run: |
+          package="${PACKAGE_PREFIX}-linux-x86_64"
+          mkdir -p "dist/$package"
+          cp src/app/tor src/config/geoip src/config/geoip6 \
+            torrc.country.example README.md LICENSE "dist/$package/"
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tor-country-linux-x86_64
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  macos:
+    name: macOS ${{ matrix.arch }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-15-intel
+            arch: x86_64
+          - runner: macos-15
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install dependencies
+        run: brew install dylibbundler libevent openssl@3 pkg-config xz zstd
+      - name: Configure
+        run: |
+          openssl_prefix="$(brew --prefix openssl@3)"
+          libevent_prefix="$(brew --prefix libevent)"
+          export CPPFLAGS="-I${openssl_prefix}/include -I${libevent_prefix}/include"
+          export LDFLAGS="-L${openssl_prefix}/lib -L${libevent_prefix}/lib"
+          export PKG_CONFIG_PATH="${openssl_prefix}/lib/pkgconfig:${libevent_prefix}/lib/pkgconfig"
+          ./configure $CONFIGURE_FLAGS
+      - name: Build
+        run: make -j"$(sysctl -n hw.ncpu)"
+      - name: Package
+        run: |
+          package="${PACKAGE_PREFIX}-macos-${{ matrix.arch }}"
+          mkdir -p "dist/$package"
+          cp src/app/tor src/config/geoip src/config/geoip6 \
+            torrc.country.example README.md LICENSE "dist/$package/"
+          dylibbundler -od -b -x "dist/$package/tor" \
+            -d "dist/$package/lib" -p '@executable_path/lib/'
+          tar -C dist -czf "dist/$package.tar.gz" "$package"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tor-country-macos-${{ matrix.arch }}
+          path: dist/*.tar.gz
+          if-no-files-found: error
+
+  windows:
+    name: Windows x86-64
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: msys2/setup-msys2@v2
+        with:
+          msystem: UCRT64
+          update: true
+          install: >-
+            base-devel
+            mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-libevent
+            mingw-w64-ucrt-x86_64-openssl
+            mingw-w64-ucrt-x86_64-zlib
+            mingw-w64-ucrt-x86_64-xz
+            mingw-w64-ucrt-x86_64-zstd
+      - name: Configure and build
+        shell: msys2 {0}
+        run: |
+          ./configure --host=x86_64-w64-mingw32 $CONFIGURE_FLAGS
+          make -j"$(nproc)"
+      - name: Stage package
+        shell: msys2 {0}
+        run: |
+          package="${PACKAGE_PREFIX}-windows-x86_64"
+          mkdir -p "dist/$package"
+          cp src/app/tor.exe src/config/geoip src/config/geoip6 \
+            torrc.country.example README.md LICENSE "dist/$package/"
+          ldd src/app/tor.exe | awk '/\/ucrt64\/bin\// { print $3 }' | \
+            while read -r dll; do cp "$dll" "dist/$package/"; done
+      - name: Create zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path "dist/$env:PACKAGE_PREFIX-windows-x86_64" `
+            -DestinationPath "dist/$env:PACKAGE_PREFIX-windows-x86_64.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tor-country-windows-x86_64
+          path: dist/*.zip
+          if-no-files-found: error
+
+  release:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [linux, macos, windows]
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: tor-country-*
+          path: dist
+          merge-multiple: true
+      - name: Generate checksums
+        working-directory: dist
+        run: sha256sum *.tar.gz *.zip > SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            dist/*.tar.gz
+            dist/*.zip
+            dist/SHA256SUMS

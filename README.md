@@ -1,73 +1,78 @@
-Tor protects your privacy on the internet by hiding the connection between
-your Internet address and the services you use. We believe Tor is reasonably
-secure, but please ensure you read the instructions and configure it properly.
+# Tor Country Router
 
-## Build
+This fork routes each authenticated SOCKS5 clearnet stream through an exit
+relay in the country named by its username. One Tor process and one SOCKS port
+can serve multiple countries concurrently without changing `ExitNodes` or
+restarting.
 
-To build Tor from source:
+Country routing is enabled by default. The default shared password is
+`123456`; change it before exposing the SOCKS port beyond localhost.
 
-```
-./configure
-make
-make install
-```
+## Quick start
 
-To build Tor from a just-cloned git repository:
+Release archives include the Tor binary, `geoip`, `geoip6`, and
+`torrc.country.example`. Start Tor from the extracted directory:
 
-```
-./autogen.sh
-./configure
-make
-make install
+```sh
+./tor -f torrc.country.example
 ```
 
-## Releases
+On Windows:
 
-The tarballs, checksums and signatures can be found here: https://dist.torproject.org
+```powershell
+.\tor.exe -f .\torrc.country.example
+```
 
-- Checksum: `<tarball-name>.sha256sum`
-- Signatures: `<tarball-name>.sha256sum.asc`
+Then use an ISO 3166-1 alpha-2 country code as the SOCKS5 username:
 
-### Schedule
+```powershell
+curl.exe -x socks5h://us:123456@127.0.0.1:9050 https://myip.ipip.net
+curl.exe -x socks5h://de:123456@127.0.0.1:9050 https://myip.ipip.net
+curl.exe -x socks5h://jp:123456@127.0.0.1:9050 https://myip.ipip.net
+curl.exe -x socks5h://ca:123456@127.0.0.1:9050 https://myip.ipip.net
+```
 
-You can find our release schedule here:
+Country codes are case-insensitive. `socks5h` is important because it keeps
+DNS resolution inside Tor. If no relay in the requested country can reach the
+destination port, Tor fails the stream instead of using a different country.
+The country decision uses the bundled Tor GeoIP database and the exit relay's
+published IPv4 address.
 
-- https://gitlab.torproject.org/tpo/core/team/-/wikis/NetworkTeam/CoreTorReleases
+## Configuration
 
-### Keys that CAN sign a release
+The new options are:
 
-The following keys are the maintainers of this repository. One or many of
-these keys can sign the releases, do NOT expect them all:
+```text
+SocksCountryRouting 1
+SocksCountryPassword 123456
+```
 
-- Alexander Færøy:
-    [514102454D0A87DB0767A1EBBE6A0531C18A9179](https://keys.openpgp.org/vks/v1/by-fingerprint/1C1BC007A9F607AA8152C040BEA7B180B1491921)
-- David Goulet:
-    [B74417EDDF22AC9F9E90F49142E86A2A11F48D36](https://keys.openpgp.org/vks/v1/by-fingerprint/B74417EDDF22AC9F9E90F49142E86A2A11F48D36)
-- Nick Mathewson:
-    [2133BC600AB133E1D826D173FE43009C4607B1FB](https://keys.openpgp.org/vks/v1/by-fingerprint/2133BC600AB133E1D826D173FE43009C4607B1FB)
+When `SocksCountryRouting` is enabled, the SOCKS listener requires RFC1929
+username/password authentication. The username must be exactly two ASCII
+letters. Different credentials remain isolated on different circuits by Tor's
+standard `IsolateSOCKSAuth` behavior.
 
-## Development
+Keep `SocksPort` bound to localhost unless the network path to every client is
+trusted: SOCKS5 credentials are transmitted without encryption.
 
-See our hacking documentation in [doc/HACKING/](./doc/HACKING).
+## Build and test
 
-## Resources
+On Debian or Ubuntu:
 
-Home page:
+```sh
+sudo apt-get install build-essential pkg-config libevent-dev libssl-dev \
+  zlib1g-dev liblzma-dev libzstd-dev
+./configure --disable-asciidoc --disable-manpage --disable-html-manual
+make -j"$(nproc)"
+make check
+```
 
-- https://www.torproject.org/
+## Automated releases
 
-Download new versions:
+`.github/workflows/build-release.yml` builds and tests Linux x86-64, builds
+macOS x86-64 and arm64, and builds Windows x86-64. Every build uploads a
+portable archive as a workflow artifact. Pushing a tag matching `v*` also
+creates a GitHub Release containing all archives and `SHA256SUMS`.
 
-- https://www.torproject.org/download/tor
-
-How to verify Tor source:
-
-- https://support.torproject.org/little-t-tor/
-
-Documentation and Frequently Asked Questions:
-
-- https://support.torproject.org/
-
-How to run a Tor relay:
-
-- https://community.torproject.org/relay/ 
+This project is based on Tor 0.4.9.11. See `LICENSE` for licensing terms and
+the upstream Tor documentation under `doc/` for general Tor operation.

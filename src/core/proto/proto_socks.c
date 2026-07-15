@@ -131,6 +131,11 @@ parse_socks4_request(const uint8_t *raw_data, socks_request_t *req,
   socks_result_t res = SOCKS_RESULT_DONE;
   tor_addr_t destaddr;
 
+  if (get_options()->SocksCountryRouting) {
+    log_warn(LD_APP, "SOCKS4 is disabled by SocksCountryRouting");
+    return SOCKS_RESULT_INVALID;
+  }
+
   tor_assert(is_socks4a);
   tor_assert(drain_out);
 
@@ -360,12 +365,14 @@ process_socks5_methods_request(socks_request_t *req, int have_user_pass,
                                int have_no_auth)
 {
   socks_result_t res = SOCKS_RESULT_DONE;
+  const int country_routing = get_options()->SocksCountryRouting;
   socks5_server_method_t *trunnel_resp = socks5_server_method_new();
   tor_assert(trunnel_resp);
 
   socks5_server_method_set_version(trunnel_resp, SOCKS_VER_5);
 
-  if (have_user_pass && !(have_no_auth && req->socks_prefer_no_auth)) {
+  if (have_user_pass &&
+      (country_routing || !(have_no_auth && req->socks_prefer_no_auth))) {
     req->auth_type = SOCKS_USER_PASS;
     socks5_server_method_set_method(trunnel_resp, SOCKS_USER_PASS);
 
@@ -374,7 +381,7 @@ process_socks5_methods_request(socks_request_t *req, int have_user_pass,
     // that we negotiated auth
 
     log_debug(LD_APP,"socks5: accepted method 2 (username/password)");
-  } else if (have_no_auth) {
+  } else if (have_no_auth && !country_routing) {
     req->auth_type = SOCKS_NO_AUTH;
     socks5_server_method_set_method(trunnel_resp, SOCKS_NO_AUTH);
 
@@ -382,9 +389,8 @@ process_socks5_methods_request(socks_request_t *req, int have_user_pass,
 
     log_debug(LD_APP,"socks5: accepted method 0 (no authentication)");
   } else {
-    log_warn(LD_APP,
-             "socks5: offered methods don't include 'no auth' or "
-             "username/password. Rejecting.");
+    log_warn(LD_APP, "socks5: offered methods don't include an acceptable "
+                     "authentication method. Rejecting.");
     socks5_server_method_set_method(trunnel_resp, 0xFF); // reject all
     res = SOCKS_RESULT_INVALID;
   }
@@ -502,6 +508,7 @@ static socks_result_t
 process_socks5_userpass_auth(socks_request_t *req)
 {
   socks_result_t res = SOCKS_RESULT_DONE;
+  int auth_ok = 1;
   socks5_server_userpass_auth_t *trunnel_resp =
     socks5_server_userpass_auth_new();
   tor_assert(trunnel_resp);
@@ -517,8 +524,31 @@ process_socks5_userpass_auth(socks_request_t *req)
     goto end;
   }
 
+  if (get_options()->SocksCountryRouting) {
+    const or_options_t *options = get_options();
+    const size_t expected_len = strlen(options->SocksCountryPassword);
+    int country_ok = req->usernamelen == 2;
+
+    if (country_ok) {
+      req->country_code[0] = TOR_TOLOWER(req->username[0]);
+      req->country_code[1] = TOR_TOLOWER(req->username[1]);
+      req->country_code[2] = '\0';
+      country_ok = TOR_ISALPHA(req->country_code[0]) &&
+                   TOR_ISALPHA(req->country_code[1]);
+    }
+    auth_ok = country_ok && req->passwordlen == expected_len &&
+              tor_memeq(req->password, options->SocksCountryPassword,
+                        expected_len);
+    if (auth_ok) {
+      req->country_routing = 1;
+    } else {
+      memset(req->country_code, 0, sizeof(req->country_code));
+      log_warn(LD_APP, "Rejected country-routed SOCKS5 credentials");
+    }
+  }
+
   socks5_server_userpass_auth_set_version(trunnel_resp, SOCKS_AUTH);
-  socks5_server_userpass_auth_set_status(trunnel_resp, 0); // auth OK
+  socks5_server_userpass_auth_set_status(trunnel_resp, auth_ok ? 0 : 1);
 
   const char *errmsg = socks5_server_userpass_auth_check(trunnel_resp);
   if (errmsg) {
@@ -539,6 +569,8 @@ process_socks5_userpass_auth(socks_request_t *req)
   }
 
   req->replylen = (size_t)encoded;
+  if (!auth_ok)
+    res = SOCKS_RESULT_INVALID;
 
   end:
   socks5_server_userpass_auth_free(trunnel_resp);

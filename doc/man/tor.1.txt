@@ -1658,6 +1658,18 @@ The following options are useful only for clients (that is, if
     line is used, and all earlier flags are ignored. No error is issued for
     conflicting flags.
 
+[[SocksCountryRouting]] **SocksCountryRouting** **0**|**1**::
+    When enabled, require SOCKS5 username/password authentication and interpret
+    the username as a two-letter ISO 3166-1 country code. Each non-onion stream
+    is attached only to a circuit whose exit relay is in that country according
+    to Tor's IPv4 GeoIP database. If no suitable exit is available, the stream
+    fails instead of falling back to another country. (Default: 1)
+
+[[SocksCountryPassword]] **SocksCountryPassword** __password__::
+    Shared password required when SocksCountryRouting is enabled. SOCKS5 does
+    not encrypt credentials, so do not expose the SocksPort over an untrusted
+    network. (Default: 123456)
+
 [[TokenBucketRefillInterval]] **TokenBucketRefillInterval** __NUM__ [**msec**|**second**]::
     Set the refill delay interval of Tor's token bucket to NUM milliseconds.
     NUM must be between 1 and 1000, inclusive.  When Tor is out of bandwidth,

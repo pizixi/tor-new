@@ -148,6 +148,11 @@ struct or_options_t {
   int ReevaluateExitPolicy; /**<Should we re-evaluate Exit Policy on existing
                              * connections when it changes? */
   struct config_line_t *SocksPolicy; /**< Lists of socks policy components */
+  /** Require SOCKS5 credentials whose username is an ISO country code, and
+   * route each authenticated stream through an exit in that country. */
+  int SocksCountryRouting;
+  /** Shared password accepted by country-routed SOCKS5 requests. */
+  char *SocksCountryPassword;
   struct config_line_t *DirPolicy; /**< Lists of dir policy components */
   /** Local address to bind outbound sockets */
   struct config_line_t *OutboundBindAddress;
