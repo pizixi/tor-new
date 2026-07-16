@@ -57,7 +57,28 @@ python3 update_exit_country_map.py --geoip geoip --geoip6 geoip6 \
   --output exit-countries
 ```
 
+脚本会自动读取 `HTTP_PROXY`、`HTTPS_PROXY` 和 `ALL_PROXY`，并原生支持
+`socks5://` 与 `socks5h://`，无需安装额外 Python 包。也可以显式指定代理：
+
+```sh
+python3 update_exit_country_map.py --geoip geoip --geoip6 geoip6 \
+  --output exit-countries --proxy socks5h://127.0.0.1:7789
+```
+
+如需忽略环境和系统代理，请添加 `--no-proxy`。
+
 更新完成后请重启 Tor；在支持 SIGHUP 的平台也可以发送 SIGHUP 重新加载配置。如果更新失败，脚本会保留原来的映射文件，不会用不完整文件覆盖。
+
+`torrc.country.example` 支持 Tor 自带的上游代理配置。取消示例中下面一行的
+注释，即可让 Tor 的 OR 连接经过该 SOCKS5 代理：
+
+```text
+Socks5Proxy 127.0.0.1:7789
+```
+
+这与面向应用程序的 `SocksPort 127.0.0.1:9050` 作用相反，不能把
+`Socks5Proxy` 指向 Tor 自己的 `SocksPort`，否则会形成代理循环。如果上游代理
+需要认证，必须同时配置 `Socks5ProxyUsername` 和 `Socks5ProxyPassword`。
 
 ## 构建和测试
 

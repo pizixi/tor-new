@@ -78,8 +78,31 @@ python3 update_exit_country_map.py --geoip geoip --geoip6 geoip6 \
   --output exit-countries
 ```
 
+The script automatically honors `HTTP_PROXY`, `HTTPS_PROXY`, and `ALL_PROXY`.
+It supports `socks5://` and `socks5h://` without an extra Python package. A
+proxy can also be selected explicitly:
+
+```sh
+python3 update_exit_country_map.py --geoip geoip --geoip6 geoip6 \
+  --output exit-countries --proxy socks5h://127.0.0.1:7789
+```
+
+Pass `--no-proxy` to ignore environment and system proxy settings.
+
 Restart Tor after updating the map, or send SIGHUP on platforms that support
 it. If the update fails, the script leaves the previous map unchanged.
+
+`torrc.country.example` also supports Tor's built-in upstream proxy option.
+Uncomment this example to send Tor's OR connections through a SOCKS5 proxy:
+
+```text
+Socks5Proxy 127.0.0.1:7789
+```
+
+This is the opposite side of the application-facing
+`SocksPort 127.0.0.1:9050`. Do not point `Socks5Proxy` at Tor's own
+`SocksPort`, since that creates a proxy loop. If the upstream proxy requires
+authentication, set both `Socks5ProxyUsername` and `Socks5ProxyPassword`.
 
 ## Build and test
 

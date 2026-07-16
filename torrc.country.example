@@ -15,4 +15,8 @@ DataDirectory data
 GeoIPFile geoip
 GeoIPv6File geoip6
 
+# Optional upstream proxy for Tor's OR connections. Do not point this at
+# Tor's own SocksPort, which would create a proxy loop.
+# Socks5Proxy 127.0.0.1:7789
+
 Log notice stdout

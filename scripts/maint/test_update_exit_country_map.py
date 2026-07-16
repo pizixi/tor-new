@@ -7,10 +7,29 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from update_exit_country_map import (GeoIPIndex, build_entries,
-                                     collect_addresses, render)
+                                     _parse_socks5_proxy, _proxy_for_url,
+                                     _socks5_connect, collect_addresses,
+                                     render)
+
+
+class FakeSocket:
+    """Minimal scripted socket for SOCKS5 handshake tests."""
+
+    def __init__(self, responses):
+        self.responses = bytearray(responses)
+        self.sent = []
+
+    def recv(self, size):
+        chunk = self.responses[:size]
+        del self.responses[:size]
+        return bytes(chunk)
+
+    def sendall(self, data):
+        self.sent.append(data)
 
 
 class ExitCountryMapTest(unittest.TestCase):
@@ -95,6 +114,46 @@ class ExitCountryMapTest(unittest.TestCase):
         self.assertIn("# Generated: 2026-07-15T00:00:00Z", output)
         self.assertIn("# Country consensus: country-api", output)
         self.assertIn("A" * 40 + " us 8.8.8.8\n", output)
+
+    def test_socks5h_connect_sends_hostname_to_proxy(self):
+        sock = FakeSocket(
+            b"\x05\x00" +
+            b"\x05\x00\x00\x01\x7f\x00\x00\x01\x1e\x65"
+        )
+        _socks5_connect(
+            sock, "onionoo.torproject.org", 443, True, None, None
+        )
+        hostname = b"onionoo.torproject.org"
+        self.assertEqual(sock.sent[0], b"\x05\x01\x00")
+        self.assertEqual(
+            sock.sent[1],
+            b"\x05\x01\x00\x03" + bytes([len(hostname)]) + hostname +
+            b"\x01\xbb",
+        )
+
+    def test_socks5_proxy_credentials_are_decoded(self):
+        settings = _parse_socks5_proxy(
+            "socks5://user%40name:p%40ss@127.0.0.1:7789"
+        )
+        self.assertEqual(settings["proxy_host"], "127.0.0.1")
+        self.assertEqual(settings["proxy_port"], 7789)
+        self.assertEqual(settings["username"], b"user@name")
+        self.assertEqual(settings["password"], b"p@ss")
+        self.assertFalse(settings["remote_dns"])
+
+    @mock.patch("urllib.request.proxy_bypass", return_value=False)
+    @mock.patch("urllib.request.getproxies")
+    def test_all_proxy_is_used_for_https(self, getproxies, _proxy_bypass):
+        getproxies.return_value = {"all": "socks5h://127.0.0.1:7789"}
+        self.assertEqual(
+            _proxy_for_url("https://example.com", None),
+            "socks5h://127.0.0.1:7789",
+        )
+
+    @mock.patch("urllib.request.getproxies")
+    def test_proxy_can_be_disabled(self, getproxies):
+        self.assertIsNone(_proxy_for_url("https://example.com", False))
+        getproxies.assert_not_called()
 
 
 if __name__ == "__main__":
